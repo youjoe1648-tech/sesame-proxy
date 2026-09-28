@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   const { uuid, apiKey, secretHex, cmd, history } = req.body;
 
   try {
-    const url = `https://api.candyhouse.co/public/sesame/${uuid}`;
+    const url = `https://app.candyhouse.co/api/sesame2/${uuid}/cmd`;
     const timestamp = Math.floor(Date.now() / 1000);
 
     // タイムスタンプの1?3バイト目を抽出
