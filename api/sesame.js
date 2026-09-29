@@ -11,22 +11,27 @@ export default async function handler(req, res) {
   try {
     const formattedUuid = uuid.toLowerCase();
     const url = `https://app.candyhouse.co/api/sesame2/${formattedUuid}/cmd`;
+    
+    // Unixタイムスタンプ（秒）
     const timestamp = Math.floor(Date.now() / 1000);
 
+    // タイムスタンプをLittle Endianの4バイトBufferに変換し、下位3バイトを取り出す (セサミAPI仕様)
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(timestamp, 0);
     const message = dateBuffer.slice(1, 4);
 
-    const key = Buffer.from(secretHex, 'hex');
+    // シークレットキー（HEX文字列）からBufferを生成
+    const key = Buffer.from(secretHex.trim(), 'hex');
+    
+    // AES-CMACで署名を計算
     const sign = aesCmac(key, message);
 
     const payload = {
-      cmd: Number(cmd),
+      cmd: Number(cmd) || 88, // 送信されたcmd（解錠は88）
       history: Buffer.from(history || 'Dropin').toString('base64'),
       sign: sign
     };
 
-    // デバッグログ出力（Vercelの管理画面で確認可能）
     console.log("--- REQUEST DEBUG ---");
     console.log("Target URL:", url);
     console.log("Headers:", { 'x-api-key': apiKey });
