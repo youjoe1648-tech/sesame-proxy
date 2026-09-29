@@ -9,7 +9,8 @@ export default async function handler(req, res) {
   const { uuid, apiKey, secretHex, cmd, history } = req.body;
 
   try {
-    const url = `https://app.candyhouse.co/api/sesame2/${uuid}/cmd`;
+    const formattedUuid = uuid.toLowerCase();
+    const url = `https://app.candyhouse.co/api/sesame2/${formattedUuid}/cmd`;
     const timestamp = Math.floor(Date.now() / 1000);
 
     const dateBuffer = Buffer.alloc(4);
