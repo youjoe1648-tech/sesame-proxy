@@ -9,25 +9,27 @@ export default async function handler(req, res) {
   const { uuid, apiKey, secretHex, cmd, history } = req.body;
 
   try {
-    const formattedUuid = uuid.toLowerCase();
+    const formattedUuid = uuid.trim().toLowerCase();
     const url = `https://app.candyhouse.co/api/sesame2/${formattedUuid}/cmd`;
     
-    // Unixタイムスタンプ（秒）
+    // 現在時刻のUnixタイムスタンプ（秒）
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // タイムスタンプをLittle Endianの4バイトBufferに変換し、下位3バイトを取り出す (セサミAPI仕様)
+    // 4バイトのBufferを作成 (Little Endian)
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(timestamp, 0);
-    const message = dateBuffer.slice(1, 4);
 
-    // シークレットキー（HEX文字列）からBufferを生成
+    // 【セサミ5 正解ロジック】 最初の3バイト(インデックス0?2)を取り出す
+    const message = dateBuffer.slice(0, 3);
+
+    // シークレットキー（HEX文字列）をBuffer化
     const key = Buffer.from(secretHex.trim(), 'hex');
     
     // AES-CMACで署名を計算
     const sign = aesCmac(key, message);
 
     const payload = {
-      cmd: Number(cmd) || 88, // 送信されたcmd（解錠は88）
+      cmd: Number(cmd) || 88,
       history: Buffer.from(history || 'Dropin').toString('base64'),
       sign: sign
     };
@@ -40,7 +42,7 @@ export default async function handler(req, res) {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey,
+        'x-api-key': apiKey.trim(),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
