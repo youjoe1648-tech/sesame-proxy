@@ -9,25 +9,27 @@ export default async function handler(req, res) {
   const { uuid, apiKey, secretHex, cmd, history } = req.body;
 
   try {
-    // セサミ5 Web API v2 エンドポイント
     const url = `https://app.candyhouse.co/api/sesame2/${uuid}/cmd`;
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // タイムスタンプの1?3バイト目を抽出（Little Endian）
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(timestamp, 0);
     const message = dateBuffer.slice(1, 4);
 
-    // AES-CMAC 署名計算
     const key = Buffer.from(secretHex, 'hex');
     const sign = aesCmac(key, message);
 
-    // セサミAPIへ送信（cmd, history, sign を送信）
     const payload = {
       cmd: Number(cmd),
       history: Buffer.from(history || 'Dropin').toString('base64'),
       sign: sign
     };
+
+    // デバッグログ出力（Vercelの管理画面で確認可能）
+    console.log("--- REQUEST DEBUG ---");
+    console.log("Target URL:", url);
+    console.log("Headers:", { 'x-api-key': apiKey });
+    console.log("Payload:", payload);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -39,9 +41,13 @@ export default async function handler(req, res) {
     });
 
     const data = await response.text();
+    console.log("Response Status:", response.status);
+    console.log("Response Data:", data);
+
     res.status(response.status).send(data);
 
   } catch (error) {
+    console.error("Handler Error:", error);
     res.status(500).json({ error: error.message });
   }
 }
