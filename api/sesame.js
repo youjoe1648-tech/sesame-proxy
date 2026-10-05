@@ -1,61 +1,59 @@
-// api/sesame.js
-const { aesCmac } = require('node-aes-cmac');
+import crypto from 'crypto';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { uuid, apiKey, secretHex, cmd, history } = req.body;
-
   try {
-    const formattedUuid = uuid.trim().toLowerCase();
-    const url = `https://app.candyhouse.co/api/sesame2/${formattedUuid}/cmd`;
-    
-    // Œ»İ‚ÌUnixƒ^ƒCƒ€ƒXƒ^ƒ“ƒvi•bj
-    const timestamp = Math.floor(Date.now() / 1000);
+    const { SESAME_UUID, SESAME_SECRET_KEY, SESAME_API_KEY } = process.env;
 
-    // 4ƒoƒCƒg‚ÌBuffer‚ğì¬ (Little Endian)
+    if (!SESAME_UUID || !SESAME_SECRET_KEY || !SESAME_API_KEY) {
+      return res.status(500).json({ error: 'Missing environment variables.' });
+    }
+
+    // 1. AES-CMAC ç½²åï¼ˆsignï¼‰ã®ç”Ÿæˆ
+    const date = Math.floor(Date.now() / 1000);
     const dateBuffer = Buffer.alloc(4);
-    dateBuffer.writeUInt32LE(timestamp, 0);
-
-    // yƒZƒTƒ~5 ³‰ğƒƒWƒbƒNz Å‰‚Ì3ƒoƒCƒg(ƒCƒ“ƒfƒbƒNƒX0?2)‚ğæ‚èo‚·
-    const message = dateBuffer.slice(0, 3);
-
-    // ƒV[ƒNƒŒƒbƒgƒL[iHEX•¶š—ñj‚ğBuffer‰»
-    const key = Buffer.from(secretHex.trim(), 'hex');
+    dateBuffer.writeUInt32LE(date, 0);
     
-    // AES-CMAC‚Å–¼‚ğŒvZ
-    const sign = aesCmac(key, message);
+    // dateBufferã®2ãƒã‚¤ãƒˆç›®ã€œ4ãƒã‚¤ãƒˆç›®ï¼ˆ3ãƒã‚¤ãƒˆåˆ†ï¼‰ã‚’ä½¿ç”¨
+    const message = dateBuffer.slice(1, 4);
 
-    const payload = {
-      cmd: Number(cmd) || 88,
-      history: Buffer.from(history || 'Dropin').toString('base64'),
-      sign: sign
-    };
+    const secretKeyBuffer = Buffer.from(SESAME_SECRET_KEY, 'hex');
 
-    console.log("--- REQUEST DEBUG ---");
-    console.log("Target URL:", url);
-    console.log("Headers:", { 'x-api-key': apiKey });
-    console.log("Payload:", payload);
+    // Node.js crypto ã‚’ä½¿ç”¨ã—ãŸ AES-CMAC è¨ˆç®—
+    const cipher = crypto.createCipheriv('aes-128-cbc', secretKeyBuffer, Buffer.alloc(16, 0));
+    cipher.setAutoPadding(false);
+    let cmac = cipher.update(Buffer.concat([message, Buffer.alloc(13, 0)]));
+    cmac = Buffer.concat([cmac, cipher.final()]);
+    const sign = cmac.slice(0, 16).toString('hex');
 
-    const response = await fetch(url, {
+    // 2. å±¥æ­´ï¼ˆhistoryï¼‰ã®Base64ã‚¨ãƒ³ã‚³ãƒ¼ãƒ‰
+    const historyText = req.body?.history || 'WebUnlock';
+    const historyBase64 = Buffer.from(historyText, 'utf-8').toString('base64');
+
+    // 3. ã‚»ã‚µãƒŸ5ç”¨ API v3 ã‚¨ãƒ³ãƒ‰ãƒã‚¤ãƒ³ãƒˆã¸é€ä¿¡
+    // URLã‚’ ssm3.candyhouse.co/api/shadow/sesame/... ã«å¤‰æ›´
+    const targetUrl = `https://ssm3.candyhouse.co/api/shadow/sesame/${SESAME_UUID}`;
+
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey.trim(),
-        'Content-Type': 'application/json'
+        'x-api-key': SESAME_API_KEY,
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        cmd: 88, // 88: è§£éŒ  (Toggle/Unlock)
+        history: historyBase64,
+        sign: sign,
+      }),
     });
 
-    const data = await response.text();
-    console.log("Response Status:", response.status);
-    console.log("Response Data:", data);
-
-    res.status(response.status).send(data);
+    const responseData = await response.json();
+    return res.status(200).json({ statusCode: response.status, data: responseData });
 
   } catch (error) {
-    console.error("Handler Error:", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 }
