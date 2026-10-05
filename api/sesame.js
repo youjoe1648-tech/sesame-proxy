@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import https from 'https';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -16,13 +17,10 @@ export default async function handler(req, res) {
     const date = Math.floor(Date.now() / 1000);
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(date, 0);
-    
-    // dateBufferの2〜4バイト目（3バイト分）を取得
     const message = dateBuffer.subarray(1, 4);
 
     const secretKeyBuffer = Buffer.from(SESAME_SECRET_KEY, 'hex');
 
-    // AES-128-CBC による簡易CMAC処理
     const cipher = crypto.createCipheriv('aes-128-cbc', secretKeyBuffer, Buffer.alloc(16, 0));
     cipher.setAutoPadding(false);
     let cmac = cipher.update(Buffer.concat([message, Buffer.alloc(13, 0)]));
@@ -33,33 +31,53 @@ export default async function handler(req, res) {
     const historyText = req.body?.history || 'WebUnlock';
     const historyBase64 = Buffer.from(historyText, 'utf-8').toString('base64');
 
-    // 3. セサミ5用 API v3 エンドポイントへ送信
-    const targetUrl = `https://ssm3.candyhouse.co/api/shadow/sesame/${SESAME_UUID}`;
+    // 3. 送信ペイロードの準備
+    const postData = JSON.stringify({
+      cmd: 88,
+      history: historyBase64,
+      sign: sign,
+    });
 
-    const response = await fetch(targetUrl, {
+    // 4. https モジュールを使用した直直接通信
+    const options = {
+      hostname: 'ssm3.candyhouse.co',
+      port: 443,
+      path: `/api/shadow/sesame/${SESAME_UUID}`,
       method: 'POST',
       headers: {
         'x-api-key': SESAME_API_KEY,
         'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
       },
-      body: JSON.stringify({
-        cmd: 88,
-        history: historyBase64,
-        sign: sign,
-      }),
+    };
+
+    const responseData = await new Promise((resolve, reject) => {
+      const request = https.request(options, (response) => {
+        let body = '';
+        response.on('data', (chunk) => (body += chunk));
+        response.on('end', () => {
+          try {
+            resolve({ status: response.statusCode, data: JSON.parse(body) });
+          } catch (e) {
+            resolve({ status: response.statusCode, data: body });
+          }
+        });
+      });
+
+      request.on('error', (error) => {
+        reject(error);
+      });
+
+      request.write(postData);
+      request.end();
     });
 
-    const responseText = await response.text();
-    let responseData;
-    try {
-      responseData = JSON.parse(responseText);
-    } catch (e) {
-      responseData = responseText;
-    }
-
-    return res.status(200).json({ statusCode: response.status, data: responseData });
+    return res.status(200).json({
+      statusCode: responseData.status,
+      data: responseData.data,
+    });
 
   } catch (error) {
-    return res.status(500).json({ error: error.message || 'Unknown error' });
+    return res.status(500).json({ error: error.message || 'Request failed' });
   }
 }
