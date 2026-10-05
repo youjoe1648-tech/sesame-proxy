@@ -38,9 +38,9 @@ export default async function handler(req, res) {
       sign: sign,
     });
 
-    // 4. https モジュールを使用した直直接通信
+    // 4. セサミ5（API v3）の正しいドメインへ送信
     const options = {
-      hostname: 'ssm3.candyhouse.co',
+      hostname: 'ssm3.openlock.cc',
       port: 443,
       path: `/api/shadow/sesame/${SESAME_UUID}`,
       method: 'POST',
