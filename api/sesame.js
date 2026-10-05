@@ -1,15 +1,18 @@
 import crypto from 'crypto';
 
-// AES-CMAC 署名計算関数
-function calcCmac(secretKeyHex, messageBuffer) {
+// CANDY HOUSE公式（RFC 4493）準拠の完全なAES-CMAC計算
+function generateCmac(secretKeyHex, messageBuffer) {
   const keyBuffer = Buffer.from(secretKeyHex, 'hex');
 
+  // 1. ゼロブロック暗号化
   const cipher1 = crypto.createCipheriv('aes-128-cbc', keyBuffer, Buffer.alloc(16, 0));
   cipher1.setAutoPadding(false);
   let L = cipher1.update(Buffer.alloc(16, 0));
   L = Buffer.concat([L, cipher1.final()]);
 
   const const_Rb = Buffer.from('00000000000000000000000000000087', 'hex');
+
+  // 2. K1の生成
   let K1 = Buffer.alloc(16);
   let carry = 0;
   for (let i = 15; i >= 0; i--) {
@@ -23,15 +26,32 @@ function calcCmac(secretKeyHex, messageBuffer) {
     }
   }
 
+  // 3. K2の生成（← ここが完全に欠落していました）
+  let K2 = Buffer.alloc(16);
+  carry = 0;
+  for (let i = 15; i >= 0; i--) {
+    const byte = K1[i];
+    K2[i] = ((byte << 1) & 0xff) | carry;
+    carry = (byte & 0x80) ? 1 : 0;
+  }
+  if (K1[0] & 0x80) {
+    for (let i = 0; i < 16; i++) {
+      K2[i] ^= const_Rb[i];
+    }
+  }
+
+  // 4. メッセージ（3バイト）のパディング処理
   const paddedMessage = Buffer.alloc(16, 0);
   messageBuffer.copy(paddedMessage);
   paddedMessage[messageBuffer.length] = 0x80;
 
+  // 5. データ長が16バイト未満のため「K2」とXOR演算（K1ではない）
   const M_last = Buffer.alloc(16);
   for (let i = 0; i < 16; i++) {
-    M_last[i] = paddedMessage[i] ^ K1[i];
+    M_last[i] = paddedMessage[i] ^ K2[i];
   }
 
+  // 6. 最終暗号化
   const cipher2 = crypto.createCipheriv('aes-128-cbc', keyBuffer, Buffer.alloc(16, 0));
   cipher2.setAutoPadding(false);
   let mac = cipher2.update(M_last);
@@ -46,33 +66,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    let { SESAME_UUID, SESAME_SECRET_KEY, SESAME_API_KEY } = process.env;
+    const { SESAME_UUID, SESAME_SECRET_KEY, SESAME_API_KEY } = process.env;
 
     if (!SESAME_UUID || !SESAME_SECRET_KEY || !SESAME_API_KEY) {
       return res.status(500).json({ error: 'Missing environment variables.' });
     }
 
-    let cleanSecretKey = SESAME_SECRET_KEY.trim();
-
-    // もし環境変数が Base64 の場合、自動的に HEX（16進数）へデコード変換
-    if (cleanSecretKey.includes('%') || cleanSecretKey.endsWith('=')) {
-      const decodedUrl = decodeURIComponent(cleanSecretKey);
-      cleanSecretKey = Buffer.from(decodedUrl, 'base64').toString('hex');
-    }
-
-    const cleanUuid = SESAME_UUID.trim().toLowerCase();
+    const cleanUuid = SESAME_UUID.trim().toUpperCase();
+    const cleanSecretKey = SESAME_SECRET_KEY.trim();
     const cleanApiKey = SESAME_API_KEY.trim();
 
-    // 1. UNIXタイムスタンプから3バイトのメッセージを抽出
+    // UNIXタイムスタンプ（秒）を取得
     const date = Math.floor(Date.now() / 1000);
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(date, 0);
+    
+    // 2〜4バイト目（3バイト分）を抽出
     const message = dateBuffer.subarray(1, 4);
 
-    // 2. 正確な HEX シークレットキーで署名 (sign) を計算
-    const sign = calcCmac(cleanSecretKey, message);
+    // K2を用いた正しい暗号署名の生成
+    const sign = generateCmac(cleanSecretKey, message);
 
-    // 3. 履歴のBase64エンコード
     const historyText = req.body?.history || 'WebUnlock';
     const historyBase64 = Buffer.from(historyText, 'utf-8').toString('base64');
 
@@ -91,7 +105,14 @@ export default async function handler(req, res) {
       }),
     });
 
-    const responseData = await response.json();
+    // 空のレスポンスボディが返ってきた際のエラー回避
+    const responseText = await response.text();
+    let responseData = {};
+    try {
+      if (responseText) responseData = JSON.parse(responseText);
+    } catch (e) {
+      responseData = { text: responseText };
+    }
 
     return res.status(200).json({
       statusCode: response.status,
