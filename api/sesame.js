@@ -12,21 +12,20 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Missing environment variables.' });
     }
 
-    // 1. UNIXタイムスタンプ（秒）から3バイトのメッセージ（2〜4バイト目）を抽出
+    // 1. タイムスタンプ生成とメッセージ抽出（2〜4バイト目の3バイト）
     const date = Math.floor(Date.now() / 1000);
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(date, 0);
     const message = dateBuffer.subarray(1, 4);
 
-    // 2. aes-cmac ライブラリによる正しい暗号署名（sign）の生成
-    // (aesCmac は同期関数で HEX 文字列を返します)
+    // 2. AES-CMAC 署名（sign）の計算
     const sign = aesCmac(SESAME_SECRET_KEY, message);
 
     // 3. 履歴（history）の Base64 エンコード
     const historyText = req.body?.history || 'WebUnlock';
     const historyBase64 = Buffer.from(historyText, 'utf-8').toString('base64');
 
-    // 4. CANDY HOUSE Web API エンドポイントへ送信
+    // 4. セサミ5 / 5 Pro 用の正しい Web API エンドポイント
     const targetUrl = `https://app.candyhouse.co/api/sesame2/${SESAME_UUID}/cmd`;
 
     const response = await fetch(targetUrl, {
