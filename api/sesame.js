@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import https from 'https';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -13,71 +12,51 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Missing environment variables.' });
     }
 
-    // 1. AES-CMAC 署名（sign）の生成
+    // 1. AES-CMAC 署名 (sign) の生成
     const date = Math.floor(Date.now() / 1000);
     const dateBuffer = Buffer.alloc(4);
     dateBuffer.writeUInt32LE(date, 0);
+    
+    // dateBuffer の 2〜4バイト目（3バイト分）を取得
     const message = dateBuffer.subarray(1, 4);
 
     const secretKeyBuffer = Buffer.from(SESAME_SECRET_KEY, 'hex');
 
+    // AES-128-CBC を使用した CMAC 計算
     const cipher = crypto.createCipheriv('aes-128-cbc', secretKeyBuffer, Buffer.alloc(16, 0));
     cipher.setAutoPadding(false);
     let cmac = cipher.update(Buffer.concat([message, Buffer.alloc(13, 0)]));
     cmac = Buffer.concat([cmac, cipher.final()]);
     const sign = cmac.subarray(0, 16).toString('hex');
 
-    // 2. 履歴（history）のBase64エンコード
+    // 2. 履歴 (history) の Base64 エンコード
     const historyText = req.body?.history || 'WebUnlock';
     const historyBase64 = Buffer.from(historyText, 'utf-8').toString('base64');
 
-    // 3. 送信データ作成
-    const postData = JSON.stringify({
-      cmd: 88,
-      history: historyBase64,
-      sign: sign,
-    });
+    // 3. CANDY HOUSE Web API エンドポイント（正解のURL）
+    const targetUrl = `https://app.candyhouse.co/api/sesame2/${SESAME_UUID}/cmd`;
 
-    // 4. CANDY HOUSE 公式API (app.candyhouse.co) への直接送信
-    const options = {
-      hostname: 'app.candyhouse.co',
-      port: 443,
-      path: `/api/shadow/sesame/${SESAME_UUID}`,
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'x-api-key': SESAME_API_KEY,
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
       },
-    };
-
-    const responseData = await new Promise((resolve, reject) => {
-      const request = https.request(options, (response) => {
-        let body = '';
-        response.on('data', (chunk) => (body += chunk));
-        response.on('end', () => {
-          try {
-            resolve({ status: response.statusCode, data: JSON.parse(body) });
-          } catch (e) {
-            resolve({ status: response.statusCode, data: body });
-          }
-        });
-      });
-
-      request.on('error', (error) => {
-        reject(error);
-      });
-
-      request.write(postData);
-      request.end();
+      body: JSON.stringify({
+        cmd: 88, // 88: 解錠 (Toggle/Unlock)
+        history: historyBase64,
+        sign: sign,
+      }),
     });
 
+    const responseData = await response.json();
+
     return res.status(200).json({
-      statusCode: responseData.status,
-      data: responseData.data,
+      statusCode: response.status,
+      candyHouseResponse: responseData,
     });
 
   } catch (error) {
-    return res.status(500).json({ error: error.message || 'Request failed' });
+    return res.status(500).json({ error: error.message || 'Unknown Error' });
   }
 }
