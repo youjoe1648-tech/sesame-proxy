@@ -31,16 +31,16 @@ export default async function handler(req, res) {
     const historyText = req.body?.history || 'WebUnlock';
     const historyBase64 = Buffer.from(historyText, 'utf-8').toString('base64');
 
-    // 3. 送信ペイロードの準備
+    // 3. 送信データ作成
     const postData = JSON.stringify({
       cmd: 88,
       history: historyBase64,
       sign: sign,
     });
 
-    // 4. セサミ5（API v3）の正しいドメインへ送信
+    // 4. CANDY HOUSE 公式API (app.candyhouse.co) への直接送信
     const options = {
-      hostname: 'ssm3.openlock.cc',
+      hostname: 'app.candyhouse.co',
       port: 443,
       path: `/api/shadow/sesame/${SESAME_UUID}`,
       method: 'POST',
